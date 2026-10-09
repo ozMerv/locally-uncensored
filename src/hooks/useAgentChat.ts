@@ -1124,7 +1124,7 @@ export function useAgentChat() {
     // optional function calls. Only the authorised Main Chat web capability
     // may take this route, and it is scoped to this single user turn.
     if (opts?.chatToolsMode &&
-        permissions.web !== 'blocked' &&
+        permissions.web === 'auto' &&
         toolMatchesCurated('web_search') &&
         offeredTools.some((tool) => tool.name === 'web_search') &&
         needsChatWebResearch(userContent)) {

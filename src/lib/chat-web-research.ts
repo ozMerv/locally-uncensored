@@ -14,12 +14,22 @@ const MAX_PAGE = 5800
  * the selected local LLM decides not to emit an optional tool call.
  * This only runs with Chat Tools enabled AND web_search authorised.
  */
-export function needsChatWebResearch(question: string): boolean {
-  return detectChatToolCapability(question) === 'web'
+function technicalSetupQuestion(question: string): boolean {
+  return (
+    /\b(?:how\s+(?:do|can)\s+(?:i|we)\s+|how\s+to\s+|steps?\s+to\s+)(?:set\s*up|install|configure|integrate|connect|run|test)\b/i.test(question) &&
+    /\b(?:api[\s-]?keys?|cli|sdk|npm|npx|pip|github|git|repo(?:sitory)?|mcp|agents?|test[\s-]?drive|node\.?js|docker|harness|packages?|providers?|models?|plugins?|integration|webui|software|terminal|shell)\b/i.test(question)
+  )
 }
 
-function firstSafePublicUrl(search: string): string | null {
-  for (const token of search.match(/https?:\/\/[^\s<>"'\])]+/g) ?? []) {
+export function needsChatWebResearch(question: string): boolean {
+  return detectChatToolCapability(question) === 'web' || technicalSetupQuestion(question)
+}
+
+function firstSafePublicUrl(search: string, question: string): string | null {
+  const urls = search.match(/https?:\/\/[^\s<>"'\])]+/g) ?? []
+  const wanted = /test[\s-]?drive/i.test(question) ? 'test-drive' : /install(?:ation)?/i.test(question) ? 'install' : null
+  const ordered = wanted ? [...urls].sort((a, b) => Number(b.toLowerCase().includes(wanted)) - Number(a.toLowerCase().includes(wanted))) : urls
+  for (const token of ordered) {
     try {
       const url = new URL(token.replace(/[.,;]+$/, ''))
       if (url.protocol !== 'https:' && url.protocol !== 'http:') continue
@@ -50,7 +60,16 @@ export async function prefetchChatWebResearch(
   let search: string
   try {
     search = await run('web_search', {
-      query: question.slice(0, MAX_QUERY),
+      // Compact conversational phrasing into searchable product terms. A
+      // literal full-sentence search placed third-party marketing pages above
+      // the project's own test-drive documentation in a live Paperclip test.
+      query: (technicalSetupQuestion(question)
+        ? question
+            .replace(/[?!,.:]/g, ' ')
+            .split(/\s+/)
+            .filter((word) => word && !/^(how|do|can|i|we|you|to|the|a|an|and|with|for|my|set|up|run|install|configure|it|this)$/i.test(word))
+            .join(' ') + ' official documentation GitHub'
+        : question).slice(0, MAX_QUERY),
       maxResults: 5,
     })
   } catch (error) {
@@ -67,7 +86,7 @@ export async function prefetchChatWebResearch(
   }
 
   const chunks = ['Search results (untrusted source data):\n' + search.slice(0, MAX_SEARCH)]
-  const url = canFetch ? firstSafePublicUrl(search) : null
+  const url = canFetch ? firstSafePublicUrl(search, question) : null
   if (url) {
     try {
       const page = await run('web_fetch', { url, maxLength: MAX_PAGE })

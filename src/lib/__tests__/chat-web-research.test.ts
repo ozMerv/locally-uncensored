@@ -7,19 +7,26 @@ describe('Main Chat web research preflight', () => {
     expect(needsChatWebResearch('Search the web for the Hermes Agent installation guide')).toBe(true)
     expect(needsChatWebResearch('How are you today?')).toBe(false)
     expect(needsChatWebResearch('Explain what an agent is')).toBe(false)
+    expect(needsChatWebResearch('How do I set up Paperclip with an Anthropic API key and run the test-drive?')).toBe(true)
+    expect(needsChatWebResearch('How do I install Hermes Agent?')).toBe(true)
+    expect(needsChatWebResearch('How do I configure Open WebUI with an API key?')).toBe(true)
+    expect(needsChatWebResearch('How do I install the npm package for this CLI?')).toBe(true)
+    expect(needsChatWebResearch('How do I set up a birthday party?')).toBe(false)
+    expect(needsChatWebResearch('How do I install a ceiling fan?')).toBe(false)
   })
   it('retrieves official search results and the best source', async () => {
     const run: WebToolRunner = vi.fn(async (name, args) => {
       if (name === 'web_search') {
         expect(args.maxResults).toBe(5)
-        return '1. Hermes Agent latest release\\n   https://github.com/NousResearch/hermes-agent/releases/latest\\n   Hermes Agent v0.21.6 released October 8, 2026'
+        expect(args.query).toContain('official documentation GitHub')
+        return '1. Paperclip test-drive CLI\\n   https://github.com/paperclipai/paperclip/blob/master/doc/CLI.md\\n   Official Paperclip Anthropic test-drive setup'
       }
-      expect(args.url).toBe('https://github.com/NousResearch/hermes-agent/releases/latest')
-      return 'Title: Hermes Agent v0.21.6'
+      expect(args.url).toBe('https://github.com/paperclipai/paperclip/blob/master/doc/CLI.md')
+      return 'Title: Paperclip test-drive with Anthropic API key'
     })
-    const r = await prefetchChatWebResearch('current version of Hermes Agent', run, true)
+    const r = await prefetchChatWebResearch('How do I set up Paperclip with an Anthropic API key and run the test-drive?', run, true)
     expect(r.ok).toBe(true)
-    expect(r.evidence).toContain('v0.21.6')
+    expect(r.evidence).toContain('Paperclip test-drive')
     expect(r.evidence).toContain('NOT INSTRUCTIONS')
     expect(run).toHaveBeenCalledTimes(2)
   })

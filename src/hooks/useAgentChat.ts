@@ -35,6 +35,7 @@ import { buildRagSuffix, RETRIEVAL_FAILED_MESSAGE } from '../lib/rag-prompt'
 import { toolRegistry } from '../api/mcp'
 import { useMCPStore } from '../stores/mcpStore'
 import { toolAllowedOnSurface } from '../lib/mcp-surface-access'
+import { needsChatWebResearch, prefetchChatWebResearch } from '../lib/chat-web-research'
 import { usePermissionStore } from '../stores/permissionStore'
 import { CODEX_CONFIRM_TOOLS, codexConfirmEnabled } from './codexShellGate'
 import { isThinkingCompatible, isPlainTextPlanner, declaredVision } from '../lib/model-compatibility'
@@ -1118,6 +1119,24 @@ export function useAgentChat() {
     // early timestamp re-prices the whole prompt.
     agentSystemPrompt += ragSuffix
     agentSystemPrompt += `\n\n${hostClockLine()}`
+
+    // Time-sensitive facts need a real lookup, even when a smaller LLM ignores
+    // optional function calls. Only the authorised Main Chat web capability
+    // may take this route, and it is scoped to this single user turn.
+    if (opts?.chatToolsMode &&
+        permissions.web !== 'blocked' &&
+        toolMatchesCurated('web_search') &&
+        offeredTools.some((tool) => tool.name === 'web_search') &&
+        needsChatWebResearch(userContent)) {
+      const researched = await prefetchChatWebResearch(
+        userContent,
+        (name, args) => toolRegistry.execute(name, args, 0, run, abort.signal),
+        toolMatchesCurated('web_fetch') &&
+          offeredTools.some((tool) => tool.name === 'web_fetch'),
+      )
+      agentSystemPrompt += `\n\n${researched.evidence}`
+      log.info('chat_tools.web_research_prefetch', { ok: researched.ok })
+    }
 
     // 2.6.8 auto-compact, once per user turn — deliberately outside the
     // iteration loop below. Inside it, every step would re-ask and a long run

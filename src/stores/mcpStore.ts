@@ -3,6 +3,10 @@ import { persist } from 'zustand/middleware'
 import { safeJSONStorage } from '../lib/storage-quota'
 import type { MCPServerConfig, MCPToolDefinition } from '../api/mcp/types'
 
+// MCP servers are added by the user in Settings and persisted locally in
+// browser storage. No home-network endpoints are compiled into public code.
+const DEFAULT_MCP_SERVERS: MCPServerConfig[] = []
+
 interface MCPState {
   servers: MCPServerConfig[]
   connectedServers: string[]
@@ -22,7 +26,7 @@ interface MCPState {
 export const useMCPStore = create<MCPState>()(
   persist(
     (set) => ({
-      servers: [],
+      servers: DEFAULT_MCP_SERVERS,
       connectedServers: [],
       serverTools: {},
 
@@ -65,6 +69,14 @@ export const useMCPStore = create<MCPState>()(
       partialize: (state) => ({
         servers: state.servers,
       }),
+      merge: (persisted, current) => {
+        const saved = (persisted as Partial<MCPState> | undefined)?.servers ?? []
+        const byId = new Map(saved.map((server) => [server.id, server]))
+        for (const server of DEFAULT_MCP_SERVERS) {
+          if (!byId.has(server.id)) byId.set(server.id, server)
+        }
+        return { ...current, ...(persisted as Partial<MCPState>), servers: [...byId.values()] }
+      },
     }
   )
 )

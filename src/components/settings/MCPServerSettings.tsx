@@ -25,11 +25,33 @@ export function MCPServerSettings() {
   const [formCommand, setFormCommand] = useState('')
   const [formArgs, setFormArgs] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
+  // Approval key lives in component memory only. It is never persisted in
+  // browser storage, bundled into the app, or sent to Git.
+  const [approvalKey, setApprovalKey] = useState('')
+  const [formMode, setFormMode] = useState<'http' | 'command'>('http')
+  const [formUrl, setFormUrl] = useState('')
+
+  const changeMcpApproval = async (url: string, action: 'approve' | 'revoke') => {
+    const response = await fetch('/local-api/mcp-http/approve', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-locally-uncensored': 'true',
+        'x-lu-mcp-approval-key': approvalKey,
+      },
+      body: JSON.stringify({ target: url, action }),
+    })
+    const result = await response.json() as { error?: string }
+    if (!response.ok) throw new Error(result.error || 'MCP approval failed')
+  }
+
 
   const closeForm = () => {
     setFormName('')
     setFormCommand('')
     setFormArgs('')
+    setFormUrl('')
+    setFormMode('http')
     setEditingId(null)
     setShowAddForm(false)
   }
@@ -48,28 +70,82 @@ export function MCPServerSettings() {
     setEditingId(server.id)
     setFormName(server.name)
     setFormCommand(server.command)
-    setFormArgs(server.args.join(' '))
+    setFormArgs(server.command.toLowerCase() === 'http' ? '' : server.args.join(' '))
+    setFormMode(server.command.toLowerCase() === 'http' ? 'http' : 'command')
+    setFormUrl(server.command.toLowerCase() === 'http' ? server.args[0] || '' : '')
     setError(null)
     setShowAddForm(true)
   }
 
   const handleSave = async () => {
-    if (!formName.trim() || !formCommand.trim()) return
-    const felder = {
+    if (!formName.trim()) return
+    const isHttp = formMode === 'http'
+    if (isHttp && !formUrl.trim()) return
+    if (!isHttp && !formCommand.trim()) return
+    setError(null)
+
+    const fields = {
       name: formName.trim(),
-      command: formCommand.trim(),
-      args: formArgs.trim() ? formArgs.trim().split(' ') : [],
+      command: isHttp ? 'http' : formCommand.trim(),
+      args: isHttp ? [formUrl.trim()] : (formArgs.trim() ? formArgs.trim().split(' ') : []),
+    }
+    if (isHttp) {
+      try {
+        const url = new URL(fields.args[0])
+        if (!['http:', 'https:'].includes(url.protocol) ||
+          url.username || url.password || url.search || url.hash) {
+          throw new Error('Enter an HTTP(S) MCP endpoint URL without credentials or query parameters')
+        }
+        if (!approvalKey.trim()) {
+          throw new Error('Enter your local MCP approval key to authorise this server')
+        }
+        await changeMcpApproval(fields.args[0], 'approve')
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+        return
+      }
     }
     if (editingId) {
-      // Ein laufender Server traegt noch den alten Befehl. Ihn stehen zu
-      // lassen waere die schlimmere Haelfte des Fehlers: die Zeile zeigte
-      // dann den neuen Befehl, waehrend der alte Prozess weiterlaeuft.
       if (connectedServers.includes(editingId)) await handleDisconnect(editingId)
-      updateServer(editingId, felder)
+      updateServer(editingId, fields)
     } else {
-      addServer({ id: uuid(), ...felder, enabled: true })
+      addServer({ id: uuid(), ...fields, enabled: true })
     }
     closeForm()
+  }
+
+  const handleImportApproved = async () => {
+    if (!approvalKey.trim()) {
+      setError('Enter your local approval key to import approved servers')
+      return
+    }
+    setError(null)
+    try {
+      const response = await fetch('/local-api/mcp-http/approved', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-locally-uncensored': 'true',
+          'x-lu-mcp-approval-key': approvalKey,
+        },
+        body: '{}',
+      })
+      const body = await response.json() as { error?: string; targets?: string[] }
+      if (!response.ok) throw new Error(body.error || 'Failed to read local MCP approvals')
+      for (const [index, url] of (body.targets || []).entries()) {
+        if (!servers.some((server) => server.command.toLowerCase() === 'http' && server.args[0] === url)) {
+          addServer({
+            id: uuid(),
+            name: `Approved MCP ${index + 1}`,
+            command: 'http',
+            args: [url],
+            enabled: true,
+          })
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
   }
 
   const handleConnect = async (server: MCPServerConfig) => {
@@ -122,6 +198,15 @@ export function MCPServerSettings() {
   }
 
   const handleRemove = async (id: string) => {
+    const server = servers.find((s) => s.id === id)
+    if (server?.command.toLowerCase() === 'http' && approvalKey.trim() &&
+      !servers.some((s) => s.id !== id && s.command.toLowerCase() === 'http' && s.args[0] === server.args[0])) {
+      try { await changeMcpApproval(server.args[0], 'revoke') }
+      catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+        return
+      }
+    }
     await handleDisconnect(id)
     removeServer(id)
   }
@@ -129,8 +214,31 @@ export function MCPServerSettings() {
   return (
     <div className="space-y-3">
       <p className="text-[0.6rem] text-gray-500">
-        Connect external MCP servers to extend Agent capabilities with community tools.
+        Add any number of MCP servers. HTTP MCP servers can be authorised here
+        with the local approval key. Each server has separate Connect, Edit and Remove controls.
       </p>
+      <div className="space-y-1">
+        <label className="block text-[0.6rem] text-gray-400" htmlFor="lu-mcp-approval-key">
+          Local MCP approval key (never saved in the browser)
+        </label>
+        <input
+          id="lu-mcp-approval-key"
+          value={approvalKey}
+          onChange={(e) => setApprovalKey(e.target.value)}
+          type="password"
+          autoComplete="off"
+          placeholder="LU_MCP_CONFIG_TOKEN from CT213 local .env"
+          className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 focus:border-white/20 outline-none"
+        />
+      </div>
+
+      <button
+        type="button"
+        onClick={handleImportApproved}
+        className="w-full px-3 py-1.5 rounded-lg text-[0.65rem] text-gray-300 bg-white/[0.03] hover:bg-white/5 border border-white/10"
+      >
+        Import previously approved MCP servers
+      </button>
 
       {/* Server List */}
       {servers.map((server) => {
@@ -236,22 +344,45 @@ export function MCPServerSettings() {
             placeholder="Server name"
             className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 focus:border-white/20 outline-none"
           />
-          <input
-            value={formCommand}
-            onChange={(e) => setFormCommand(e.target.value)}
-            placeholder="Command (only npx or uvx)"
-            className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 font-mono focus:border-white/20 outline-none"
-          />
-          <input
-            value={formArgs}
-            onChange={(e) => setFormArgs(e.target.value)}
-            placeholder="Args (e.g. -y @modelcontextprotocol/server-filesystem /path)"
-            className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 font-mono focus:border-white/20 outline-none"
-          />
+          <select
+            value={formMode}
+            onChange={(e) => setFormMode(e.target.value === 'command' ? 'command' : 'http')}
+            className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300"
+          >
+            <option value="http">HTTP MCP server (browser)</option>
+            <option value="command">Command MCP server (desktop)</option>
+          </select>
+          {formMode === 'http' ? (
+            <input
+              value={formUrl}
+              onChange={(e) => setFormUrl(e.target.value)}
+              placeholder="MCP endpoint URL, e.g. https://mcp.example.org/mcp"
+              className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 font-mono focus:border-white/20 outline-none"
+            />
+          ) : (
+            <>
+              <input
+                value={formCommand}
+                onChange={(e) => setFormCommand(e.target.value)}
+                placeholder="Command (e.g. npx or uvx)"
+                className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 font-mono focus:border-white/20 outline-none"
+              />
+              <input
+                value={formArgs}
+                onChange={(e) => setFormArgs(e.target.value)}
+                placeholder="Arguments (space separated)"
+                className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 font-mono focus:border-white/20 outline-none"
+              />
+            </>
+          )}
+          <p className="text-[0.55rem] text-gray-500">
+            HTTP endpoints are approved server-side and stored outside Git.
+            Removing a server also revokes its approval if the key is provided.
+          </p>
           <div className="flex gap-1.5">
             <button
               onClick={handleSave}
-              disabled={!formName.trim() || !formCommand.trim()}
+              disabled={!formName.trim() || (formMode === 'http' ? !formUrl.trim() : !formCommand.trim())}
               className="px-3 py-1 rounded text-[0.6rem] font-medium bg-green-500/15 border border-green-500/30 text-green-300 hover:bg-green-500/25 disabled:opacity-40 transition-colors"
             >
               {editingId ? 'Save Changes' : 'Add Server'}

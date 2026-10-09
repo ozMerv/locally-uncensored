@@ -17,6 +17,7 @@ import { registerFsRoutes } from './fs-routes'
 import { registerSystemRoutes } from './system-routes'
 import { registerWebSearchRoutes } from './web-search'
 import { registerWhisperRoutes } from './whisper'
+import { registerMcpHttpRoutes } from './mcp-http'
 
 /** Shape of the pieces of a ViteDevServer this needs, kept structural so
  *  tests can build a plain object instead of a real Vite instance. */
@@ -125,6 +126,7 @@ export function devServerPlugin({ port }: DevServerOptions): Plugin {
       registerFsRoutes(routes)
       registerSystemRoutes(routes)
       registerWebSearchRoutes(routes)
+      registerMcpHttpRoutes(routes)
       registerWhisperRoutes(routes, (cb) => {
         server.httpServer?.on('close', cb)
         process.on('exit', cb)

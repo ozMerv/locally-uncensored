@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+# Inspect every proposed local head against reviewed master, not only the
+# final diff, so an earlier commit cannot leak data later removed.
+while read local_ref local_sha remote_ref remote_sha; do
+  case "$local_sha" in
+    0000000000000000000000000000000000000000) continue ;;
+  esac
+  ./scripts/check-public-git.sh master "$local_sha" || exit 1
+done

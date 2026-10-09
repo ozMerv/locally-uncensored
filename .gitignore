@@ -87,3 +87,7 @@ SETUP_REPORT.md
 # Teaser raw takes + render scratch (scripts/teasers) - only the encoded
 # webm/poster assets in public/teasers ship
 /assets-src/
+
+# Keep all environment-specific connection settings private.
+.env.*
+!.env.example

@@ -176,6 +176,8 @@ export class MCPExternalClient {
   }>()
   private outputBuffer = ''
   private connected = false
+  private httpTarget: string | null = null
+  private httpSessionId: string | null = null
   /** True while OUR disconnect() is taking the process down, so the close
    *  handler can tell a deliberate shutdown from a server that died. */
   private closingOnPurpose = false
@@ -204,6 +206,9 @@ export class MCPExternalClient {
   }
 
   async connect(): Promise<MCPToolDefinition[]> {
+    if (!isTauri() && this.config.command.trim().toLowerCase() === 'http') {
+      return this.connectHttp()
+    }
     try {
       // Lazy so the plugin only loads once a server connects, but vite must
       // resolve and bundle it: with @vite-ignore the packaged WebView gets a
@@ -316,7 +321,9 @@ export class MCPExternalClient {
   async callTool(name: string, args: ToolArgs): Promise<string> {
     if (!this.connected) throw new Error('Not connected')
 
-    const result = await this.sendRequest('tools/call', { name, arguments: args })
+    const result = this.httpTarget
+      ? await this.sendHttpRequest('tools/call', { name, arguments: args })
+      : await this.sendRequest('tools/call', { name, arguments: args })
 
     // MCP returns a content array of `{ type, ... }` blocks.
     const content = prop(result, 'content')
@@ -334,6 +341,14 @@ export class MCPExternalClient {
   }
 
   async disconnect() {
+    if (this.httpTarget) {
+      this.closingOnPurpose = true
+      this.connected = false
+      this.httpTarget = null
+      this.httpSessionId = null
+      liveClients.delete(this)
+      return
+    }
     this.closingOnPurpose = true
     this.connected = false
     // Out of the shutdown sweep first: a disconnect that is itself running
@@ -426,6 +441,95 @@ export class MCPExternalClient {
   }
 
   // ── Private ─────────────────────────────────────────────────
+
+  private async connectHttp(): Promise<MCPToolDefinition[]> {
+    const target = this.config.args[0]?.trim()
+    if (!target || !/^https?:\/\//i.test(target)) {
+      throw new Error('Browser MCP requires command "http" and the MCP URL as its first argument')
+    }
+    this.httpTarget = target
+    this.connected = true
+    try {
+      await this.sendHttpRequest('initialize', {
+        protocolVersion: '2025-06-18',
+        capabilities: {},
+        clientInfo: { name: 'locally-uncensored', version: 'browser' },
+      })
+      await this.sendHttpNotification('notifications/initialized', {})
+      const toolsResult = await this.sendHttpRequest('tools/list', {})
+      const tools: MCPToolDefinition[] = []
+      for (const t of asRecordArray(prop(toolsResult, 'tools'))) {
+        const toolName = asString(t.name)
+        if (!toolName) continue
+        tools.push({
+          name: toolName,
+          description: asString(t.description) || '',
+          inputSchema: isToolInputSchema(t.inputSchema) ? t.inputSchema : EMPTY_INPUT_SCHEMA,
+          category: 'workflow',
+          source: 'external',
+          serverId: this.config.id,
+        })
+      }
+      this.registered = true
+      return tools
+    } catch (err) {
+      this.connected = false
+      this.httpTarget = null
+      this.httpSessionId = null
+      throw new Error(`Failed to connect to MCP server "${this.config.name}": ${errorText(err)}`)
+    }
+  }
+
+  private async sendHttpNotification(method: string, params?: unknown): Promise<void> {
+    await this.postHttpMessage({ jsonrpc: '2.0', method, params })
+  }
+
+  private async sendHttpRequest(method: string, params?: unknown): Promise<unknown> {
+    const id = ++this.requestId
+    const payload = await this.postHttpMessage({ jsonrpc: '2.0', id, method, params })
+    if (!payload) throw new Error(`MCP HTTP request ${method} returned no response`)
+    const response = parseJsonRpcResponse(payload)
+    if (!response || response.id !== id) throw new Error(`Invalid MCP HTTP response for ${method}`)
+    if (response.error) throw new Error(response.error.message)
+    return response.result
+  }
+
+  private async postHttpMessage(message: Record<string, unknown>): Promise<unknown> {
+    if (!this.httpTarget) throw new Error('Not connected')
+    const response = await fetch('/local-api/mcp-http', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-locally-uncensored': 'true' },
+      body: JSON.stringify({
+        target: this.httpTarget,
+        sessionId: this.httpSessionId,
+        message,
+      }),
+    })
+    const envelope = await response.json() as unknown
+    if (!isRecord(envelope)) throw new Error('Invalid response from LU MCP proxy')
+    if (!response.ok || prop(envelope, 'ok') === false) {
+      throw new Error(asString(prop(envelope, 'error')) || `MCP proxy returned HTTP ${response.status}`)
+    }
+    const sessionId = asString(prop(envelope, 'sessionId'))
+    if (sessionId) this.httpSessionId = sessionId
+    const raw = asString(prop(envelope, 'body')) || ''
+    if (!raw.trim()) return undefined
+
+    const candidates = raw
+      .split('\n')
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trim())
+    if (candidates.length > 0) {
+      for (const candidate of candidates) {
+        try { return JSON.parse(candidate) as unknown } catch {}
+      }
+    }
+    try {
+      return JSON.parse(raw) as unknown
+    } catch {
+      throw new Error('MCP proxy returned an unreadable response')
+    }
+  }
 
   private sendRequest(method: string, params?: unknown): Promise<unknown> {
     return new Promise((resolve, reject) => {

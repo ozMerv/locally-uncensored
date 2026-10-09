@@ -2147,6 +2147,12 @@ export function SettingsPage() {
             <ProviderSettings />
           </Section>
 
+          {/* MCP connections belong alongside other AI backends; leave the
+              Agent-tab entry too for existing user workflows. */}
+          <Section title="MCP Servers" defaultOpen>
+            <MCPServerSettings />
+          </Section>
+
           <Section title="Model Storage">
             <HfDownloadPathSetting />
             <DownloadLimitSetting />

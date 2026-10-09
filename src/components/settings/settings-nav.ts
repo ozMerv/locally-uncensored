@@ -91,6 +91,7 @@ export function sectionsFor(tab: SettingsTab, flags: SettingsSectionFlags): stri
     case 'backends':
       return [
         'Providers',
+        'MCP Servers',
         'Model Storage',
         'CivitAI API key',
         'Hugging Face token',

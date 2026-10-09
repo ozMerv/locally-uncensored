@@ -6,6 +6,11 @@ import { pushPersistedChoicesToRust } from './lib/rust-boot-sync'
 
 function App() {
   useEffect(() => {
+    // Restore approved HTTP MCP connections independently of Settings.
+    // No local command MCPs are auto-launched on startup.
+    void import('./api/mcp/connection-manager').then(({ bootstrapApprovedHttpMcp }) => {
+      void bootstrapApprovedHttpMcp()
+    }).catch(() => {})
     // In Tauri: show the window once React has rendered (window starts hidden).
     // Rust decides whether it may — while the onboarding runs in its own
     // window, the main window stays hidden (onboarding_window.rs).

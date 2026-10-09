@@ -108,6 +108,11 @@ export interface Settings {
    * pure text (the pre-v2.5.3 behaviour); the full Agent toggle still works.
    */
   chatToolsEnabled: boolean
+  /** Main Chat tool categories are independent from Agent permissions. */
+  chatToolWebEnabled: boolean
+  chatToolFilesEnabled: boolean
+  chatToolImageEnabled: boolean
+  chatToolVideoEnabled: boolean
   cavemanMode: CavemanMode
   searchProvider: SearchProvider
   braveApiKey: string

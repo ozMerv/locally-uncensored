@@ -46,6 +46,7 @@ import { useProviderStore } from '../../stores/providerStore'
 import { useComfyInstallStore, comfySectionShouldOpen } from '../../stores/comfyInstallStore'
 import { PermissionSettings } from './PermissionSettings'
 import { MCPServerSettings } from './MCPServerSettings'
+import { MCPAssignmentSettings } from './MCPAssignmentSettings'
 import { WorkflowList } from '../agents/WorkflowList'
 import { WorkflowBuilder } from '../agents/WorkflowBuilder'
 import { useUpdateStore, isNewerVersion } from '../../stores/updateStore'
@@ -2062,6 +2063,43 @@ export function SettingsPage() {
           </Section>
           )}
 
+          <Section title="Main Chat tools" defaultOpen>
+            <p className="t-micro text-gray-500 pb-1">
+              Choose which built-in capabilities Main Chat may offer. Agent permissions
+              are managed separately. The Chat Tools toggle in the chat composer
+              turns the selected set on or off for ordinary conversations.
+            </p>
+            <InlineToggle
+              label="Web search and fetch"
+              enabled={settings.chatToolWebEnabled !== false}
+              onChange={() => updateSettings({ chatToolWebEnabled: settings.chatToolWebEnabled === false })}
+            />
+            <InlineToggle
+              label="Create chat files"
+              enabled={settings.chatToolFilesEnabled !== false}
+              onChange={() => updateSettings({ chatToolFilesEnabled: settings.chatToolFilesEnabled === false })}
+            />
+            <InlineToggle
+              label="Generate images"
+              enabled={settings.chatToolImageEnabled !== false}
+              onChange={() => updateSettings({ chatToolImageEnabled: settings.chatToolImageEnabled === false })}
+            />
+            <InlineToggle
+              label="Generate video"
+              enabled={settings.chatToolVideoEnabled !== false}
+              onChange={() => updateSettings({ chatToolVideoEnabled: settings.chatToolVideoEnabled === false })}
+            />
+            <p className="t-micro text-gray-500">
+              File creation exports an in-chat downloadable file. It does not grant
+              Main Chat access to read or edit arbitrary files on this server.
+              Image and video generation also require an available media backend.
+            </p>
+          </Section>
+
+          <Section title="Main Chat MCP access" defaultOpen>
+            <MCPAssignmentSettings surface="chat" />
+          </Section>
+
           <Section title="Privacy">
             {settings.appMode === 'cloud' ? (
               /* Cloud mode: the 100%-local pledge doesn't hold, say so
@@ -2293,6 +2331,12 @@ export function SettingsPage() {
           {FEATURE_FLAGS.AGENT_WORKFLOWS && (
             <Section title="Agent Workflows">
               <WorkflowSection />
+            </Section>
+          )}
+
+          {FEATURE_FLAGS.AGENT_MODE && (
+            <Section title="Agent MCP access" defaultOpen>
+              <MCPAssignmentSettings surface="agent" />
             </Section>
           )}
 

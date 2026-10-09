@@ -44,7 +44,12 @@ describe('Multi-Agenten bleiben aus dem normalen Chat heraus', () => {
     // useChat darf nicht heimlich an CHAT_TOOLS vorbei die volle Registry
     // uebergeben — dann waere die Liste oben Zierrat.
     const chat = lies('hooks/useChat.ts')
-    expect(chat).toMatch(/curatedTools:\s*(cloudMode|CHAT_TOOLS)/)
+    // New Chat/Agent separation: chatToolNames only returns explicitly enabled
+    // chat built-ins and connected, Chat-assigned MCP tools.
+    expect(chat).toContain('const configured = chatToolNames(')
+    expect(chat).toContain('const curatedTools = cloudMode')
+    expect(chat).toContain('curatedTools,')
+    expect(chat).toContain("(CHAT_TOOLS as readonly string[]).includes(name)")
     // Und der Agentenmodus verlaesst diesen Pfad VORHER: sonst liefe der
     // Agent selbst durch die kuratierte Fuenferliste.
     expect(chat).toMatch(/Agent mode already returned above/)

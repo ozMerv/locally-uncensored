@@ -35,6 +35,10 @@ export const DEFAULT_SETTINGS: Settings = {
   // Default ON so the capabilities "just work" without the Agent toggle; only
   // tool-worthy messages route through the executor (see chat-tool-intent.ts).
   chatToolsEnabled: true,
+  chatToolWebEnabled: true,
+  chatToolFilesEnabled: true,
+  chatToolImageEnabled: true,
+  chatToolVideoEnabled: true,
   cavemanMode: 'off',
   searchProvider: 'auto',
   braveApiKey: '',

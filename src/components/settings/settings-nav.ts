@@ -83,6 +83,8 @@ export function sectionsFor(tab: SettingsTab, flags: SettingsSectionFlags): stri
         'Import from other chatbots',
         'Chat Backup',
         ...(flags.mediaTimeouts ? ['Image / Video Generation Timeouts'] : []),
+        'Main Chat tools',
+        'Main Chat MCP access',
         'Privacy',
         'Onboarding',
         'Updates',
@@ -110,7 +112,7 @@ export function sectionsFor(tab: SettingsTab, flags: SettingsSectionFlags): stri
         // ein anderer Gegenstand als die Werte des Zugs, vor dem man sitzt.
         ...(flags.agentMode ? ['Sub-agents'] : []),
         ...(flags.agentWorkflows ? ['Agent Workflows'] : []),
-        ...(flags.agentMode ? ['MCP Servers', 'Coding Agent', 'Search Provider'] : []),
+        ...(flags.agentMode ? ['Agent MCP access', 'MCP Servers', 'Coding Agent', 'Search Provider'] : []),
       ]
     case 'voice-remote':
       return ['Speech', 'Remote Access', 'Local API']

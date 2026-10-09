@@ -33,6 +33,8 @@ import { useRAGStore } from '../stores/ragStore'
 import { retrieveContext } from '../api/rag'
 import { buildRagSuffix, RETRIEVAL_FAILED_MESSAGE } from '../lib/rag-prompt'
 import { toolRegistry } from '../api/mcp'
+import { useMCPStore } from '../stores/mcpStore'
+import { toolAllowedOnSurface } from '../lib/mcp-surface-access'
 import { usePermissionStore } from '../stores/permissionStore'
 import { CODEX_CONFIRM_TOOLS, codexConfirmEnabled } from './codexShellGate'
 import { isThinkingCompatible, isPlainTextPlanner, declaredVision } from '../lib/model-compatibility'
@@ -984,8 +986,23 @@ export function useAgentChat() {
     // model in plain chat only ever sees the 5 chat tools (and small models
     // aren't drowned in the full ~24-tool set).
     const curated = opts?.curatedTools
+    // Freeze permissions for this turn. A connected MCP is not automatically
+    // available to Main Chat or Agent mode; the administrator assigns its
+    // surface in AI Backends. Check the same gate at discovery and execution.
+    const mcpAccess = useMCPStore.getState()
     const toolMatchesCurated = (name: string) =>
-      (!curated || curated.includes(name)) && !(opts?.readOnly && !allowedInReadOnlyTurn(name))
+      (!curated || curated.includes(name)) &&
+      !(opts?.readOnly && !allowedInReadOnlyTurn(name)) &&
+      (() => {
+        const definition = toolRegistry.getToolByName(name)
+        if (!definition) return !opts?.chatToolsMode
+        return toolAllowedOnSurface(
+          definition,
+          mcpAccess.servers,
+          mcpAccess.connectedServers,
+          opts?.chatToolsMode ? 'chat' : 'agent',
+        )
+      })()
 
     // ── Die Werkzeugliste fuer den Rueckfallweg ─────────────────────────────
     //
@@ -1050,7 +1067,7 @@ export function useAgentChat() {
     let agentSystemPrompt = strategy === 'hermes_xml'
       ? buildHermesToolPrompt(hermesToolDefs) + (systemPrompt ? `\n\n${systemPrompt}` : '')
       : opts?.chatToolsMode
-        ? buildChatToolsSystemPrompt(systemPrompt)
+        ? buildChatToolsSystemPrompt(systemPrompt, offeredTools.map((tool) => tool.name))
         : settings.smallModelMode
           // Lean names only what survives the 6-tool cap, which is exactly the
           // always-included set; the rest is in the request's tool list.
@@ -3399,14 +3416,27 @@ Rules:
  * "you MUST use tools / execute end-to-end" prompt — that would turn ordinary
  * chat into an agent. Kept short so it doesn't crowd a small model's context.
  */
-export function buildChatToolsSystemPrompt(basePrompt: string): string {
-  const p = `You are a helpful chat assistant in LU, having a normal conversation. You also have a few tools for things you cannot do from memory, use one ONLY when the user's request actually needs it, otherwise just reply normally:
-- web_search, look up current/real-world facts (returns short snippets)
-- web_fetch, read a specific web page or URL (after a search, or when the user gives a link)
-- file_write, save text to a file when the user asks you to write/create/save a file
-- image_generate, create an image when the user asks for a picture/drawing/logo
-- video_generate, create a short video/animation when the user asks for one (to animate an image you just made, pass its filename as inputImage)
+export function buildChatToolsSystemPrompt(
+  basePrompt: string,
+  availableTools?: readonly string[],
+): string {
+  const builtinDescriptions: Record<string, string> = {
+    web_search: 'look up current facts (returns snippets)',
+    web_fetch: 'read a specific web page or URL',
+    file_write: 'create a downloadable file in this chat',
+    image_generate: 'create an image when requested',
+    video_generate: 'create a video or animate an image when requested',
+  }
+  const names = availableTools ?? Object.keys(builtinDescriptions)
+  const roster = names.map((name) => {
+    const description = builtinDescriptions[name] || 'use the connected, approved MCP capability when requested'
+    return `- ${name}, ${description}`
+  }).join('\n')
+  const p = `You are a helpful chat assistant in LU, having a normal conversation.
+You can use only the tools actually offered for this turn. Use a tool when the user's request needs it; otherwise reply normally.
+Available tools:
+${roster}
 
-Emit tool calls through the real tool channel, never as plain text like image_generate("…"). After a tool runs, give a short, natural reply about the result. For web questions, prefer web_search then web_fetch on the best result before answering. Reply in the user's language.`
+Emit tool calls through the real tool channel, never as text. Do not claim to have used a tool unless its call succeeded. Reply in the user's language.`
   return basePrompt ? `${p}\n\n${basePrompt}` : p
 }

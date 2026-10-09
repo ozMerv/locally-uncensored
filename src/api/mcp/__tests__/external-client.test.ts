@@ -356,13 +356,13 @@ describe('the settings panel is what acts on that', () => {
     const { readFileSync } = await import('node:fs')
     const { resolve, dirname } = await import('node:path')
     const { fileURLToPath } = await import('node:url')
-    const panel = readFileSync(
-      resolve(dirname(fileURLToPath(import.meta.url)), '../../../components/settings/MCPServerSettings.tsx'),
+    const manager = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), '../connection-manager.ts'),
       'utf8',
     )
-    expect(panel).toContain('onExit: (id) => {')
-    expect(panel).toContain('toolRegistry.unregisterServer(id)')
-    expect(panel).toContain('setConnected(id, false)')
-    expect(panel).toContain('clearServerTools(id)')
+    expect(manager).toContain('onExit: (id) => clearConnection(id)')
+    expect(manager).toContain('toolRegistry.unregisterServer(id)')
+    expect(manager).toContain('store.setConnected(id, false)')
+    expect(manager).toContain('store.clearServerTools(id)')
   })
 })

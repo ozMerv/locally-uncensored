@@ -51,3 +51,27 @@ git config core.hooksPath .githooks
 
 This scanner is deliberately conservative. Passing it is not a substitute for
 reviewing every changed file, commit history and Git-tracked path.
+
+## Main Chat and Agent MCP access (local configuration)
+
+Manage MCP connections centrally under **Settings → AI Backends → MCP Servers**.
+Each server has independent **Main Chat** and **Agents** checkboxes, allowing
+neither, either, or both surfaces. The same selections are available under
+**General → Main Chat MCP access** and **Agent → Agent MCP access**.
+
+New and existing servers are not assigned to Main Chat until explicitly
+selected. Older configurations retain Agent access by default. The choice is
+enforced in the offered tool catalogue and at tool execution time. A server
+must also be connected before its tools can run.
+
+Approved HTTP MCPs assigned to at least one surface reconnect when LU starts.
+Command-based MCPs must be connected manually and are not auto-launched.
+
+General → Main Chat tools separately controls Web, chat file creation,
+image and video tools. The chat composer toggle enables or disables the
+configured set. Main Chat does not receive unrestricted local file access.
+
+These are per-browser application routing selections, not authenticated
+multi-user roles or an operating-system security boundary. The server-side
+approval of HTTP endpoints remains mandatory. Do not expose LU's development
+server on an untrusted network.

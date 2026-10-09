@@ -66,6 +66,10 @@ export interface MCPServerConfig {
   args: string[]
   env?: Record<string, string>
   enabled: boolean
+  /** Explicit surface access; never inferred from an established connection.
+   * Existing configurations retain Agent access, but Main Chat is opt-in. */
+  useInChat?: boolean
+  useInAgent?: boolean
 }
 
 /**

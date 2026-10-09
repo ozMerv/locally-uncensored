@@ -16,6 +16,7 @@ interface MCPState {
   addServer: (server: MCPServerConfig) => void
   updateServer: (id: string, updates: Partial<MCPServerConfig>) => void
   removeServer: (id: string) => void
+  setServerSurfaces: (id: string, access: { useInChat?: boolean; useInAgent?: boolean }) => void
 
   // Connection state
   setConnected: (id: string, connected: boolean) => void
@@ -45,6 +46,12 @@ export const useMCPStore = create<MCPState>()(
           serverTools: Object.fromEntries(
             Object.entries(state.serverTools).filter(([k]) => k !== id)
           ),
+        })),
+
+      setServerSurfaces: (id, access) =>
+        set((state) => ({
+          servers: state.servers.map((server) =>
+            server.id === id ? { ...server, ...access } : server),
         })),
 
       setConnected: (id, connected) =>

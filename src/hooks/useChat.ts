@@ -35,6 +35,11 @@ import { useGenerationStore } from "../stores/generationStore"
 import { runInLane } from "../lib/run-slot"
 import { laneOf, currentLaneFacts } from "../lib/run-lane-of-model"
 import { resolveChatToolRoute, CHAT_TOOLS, type ChatToolRouteMsg } from "../lib/chat-tool-intent"
+import { useMCPStore } from '../stores/mcpStore'
+import { toolRegistry } from '../api/mcp'
+import { chatToolNames } from '../lib/mcp-surface-access'
+import { resolveToolSupport } from '../lib/tool-support'
+
 import { asksForLocalFiles, LOCAL_FILES_NOTICE } from "../lib/local-file-intent"
 import { useChatNoticeStore } from "../stores/chatNoticeStore"
 import { getProviderForModel, getProviderIdFromModel } from "../api/providers"
@@ -735,6 +740,9 @@ export function useChat() {
     // reproduces the SAME media. Pure conversation still falls through to the fast
     // plain path below, untouched. (Agent mode already returned above.)
     if (activeModel && settings.chatToolsEnabled !== false) {
+      const activeRow = useModelStore.getState().models.find((m) => m.name === activeModel)
+      const supportsTools = activeRow && activeRow.type === 'text' ? activeRow.supportsTools : undefined
+      const canUseTools = resolveToolSupport({ name: activeModel, supportsTools }) !== 'none'
       const activeConv = store.conversations.find((c) => c.id === store.activeConversationId)
       const recent: ChatToolRouteMsg[] = (activeConv?.messages ?? [])
         .slice(-12)
@@ -748,13 +756,26 @@ export function useChat() {
       // dead-ending in the local image/video tools, and the media pair is
       // stripped from the curated list so a web/file turn can't call it.
       const cloudMode = settings.appMode === 'cloud'
-      if (route && !(cloudMode && route.mediaHint)) {
+      // The Chat Tools toggle means the enabled set is really exposed to
+      // the model. Do not require a fragile keyword match to put tools on
+      // the wire: the model decides when to use one. The intent detector is
+      // retained only for image/video continuation hints.
+      const mcpAccess = useMCPStore.getState()
+      const configured = chatToolNames(
+        settings,
+        toolRegistry.getAll(),
+        mcpAccess.servers,
+        mcpAccess.connectedServers,
+      ).filter((name) => (CHAT_TOOLS as readonly string[]).includes(name) ||
+        toolRegistry.getToolByName(name)?.source === 'external')
+      const curatedTools = cloudMode
+        ? configured.filter((name) => name !== 'image_generate' && name !== 'video_generate')
+        : configured
+      if (canUseTools && curatedTools.length > 0 && !(cloudMode && route?.mediaHint)) {
         return sendAgentMessage(content, images, {
-          curatedTools: cloudMode
-            ? CHAT_TOOLS.filter((t) => t !== 'image_generate' && t !== 'video_generate')
-            : CHAT_TOOLS,
+          curatedTools,
           chatToolsMode: true,
-          mediaHint: route.mediaHint,
+          mediaHint: route?.mediaHint,
           files,
         })
       }

@@ -2,20 +2,11 @@ import { useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import { Plus, Trash2, Power, PowerOff, Pencil } from 'lucide-react'
 import { useMCPStore } from '../../stores/mcpStore'
-import { toolRegistry } from '../../api/mcp'
 import type { MCPServerConfig } from '../../api/mcp/types'
-// `import type` und nicht `import`: die Klasse wird unten bewusst dynamisch
-// geladen, damit der Tauri-Import im Dev-Modus nicht mitkommt. Ein Typ-Import
-// wird beim Uebersetzen geloescht und erzeugt keine Laufzeit-Abhaengigkeit —
-// er kostet also nichts und deckt dafuer `client.disconnect()` mit ab, das
-// unter `any` ungeprueft war.
-import type { MCPExternalClient } from '../../api/mcp/external-client'
-
-// Active client instances (lazy-loaded to avoid Tauri import in dev mode)
-const clients = new Map<string, MCPExternalClient>()
+import { connectMcpServer, disconnectMcpServer } from '../../api/mcp/connection-manager'
 
 export function MCPServerSettings() {
-  const { servers, connectedServers, serverTools, addServer, updateServer, removeServer, setConnected, setServerTools, clearServerTools } = useMCPStore()
+  const { servers, connectedServers, serverTools, addServer, updateServer, removeServer, setServerSurfaces } = useMCPStore()
   const [showAddForm, setShowAddForm] = useState(false)
   const [connecting, setConnecting] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -109,7 +100,7 @@ export function MCPServerSettings() {
       if (connectedServers.includes(editingId)) await handleDisconnect(editingId)
       updateServer(editingId, fields)
     } else {
-      addServer({ id: uuid(), ...fields, enabled: true })
+      addServer({ id: uuid(), ...fields, enabled: true, useInChat: false, useInAgent: true })
     }
     closeForm()
   }
@@ -140,6 +131,8 @@ export function MCPServerSettings() {
             command: 'http',
             args: [url],
             enabled: true,
+            useInChat: false,
+            useInAgent: true,
           })
         }
       }
@@ -152,33 +145,9 @@ export function MCPServerSettings() {
     setConnecting(server.id)
     setError(null)
     try {
-      const { MCPExternalClient } = await import('../../api/mcp/external-client')
-      // A server process can die on its own (crash, OOM kill, a bad config it
-      // quits on). Before this the panel stayed green and its tools stayed in
-      // the registry, so the model kept being offered a terminal that was not
-      // there and every call failed with "Not connected" until the app closed.
-      const client = new MCPExternalClient(server, {
-        onExit: (id) => {
-          toolRegistry.unregisterServer(id)
-          setConnected(id, false)
-          clearServerTools(id)
-          clients.delete(id)
-        },
-      })
-      const tools = await client.connect()
-      clients.set(server.id, client)
-      setConnected(server.id, true)
-      setServerTools(server.id, tools)
-      // Register tools with the global registry. The two-arg executor
-      // contract lets the registry bind each tool's name into its own
-      // closure — previously a single-arg hack tried to smuggle the name
-      // via `args.__toolName`, which was never populated, so MCP calls
-      // silently dispatched with an empty tool name and failed.
-      toolRegistry.registerExternal(
-        server.id,
-        tools,
-        async (toolName, args) => client.callTool(toolName, args)
-      )
+      // Shared manager keeps connections alive when Settings unmounts,
+      // and lets approved HTTP MCPs reconnect after a browser refresh.
+      await connectMcpServer(server)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -187,14 +156,7 @@ export function MCPServerSettings() {
   }
 
   const handleDisconnect = async (id: string) => {
-    const client = clients.get(id)
-    if (client) {
-      await client.disconnect()
-      clients.delete(id)
-    }
-    toolRegistry.unregisterServer(id)
-    setConnected(id, false)
-    clearServerTools(id)
+    await disconnectMcpServer(id)
   }
 
   const handleRemove = async (id: string) => {
@@ -213,12 +175,13 @@ export function MCPServerSettings() {
 
   return (
     <div className="space-y-3">
-      <p className="text-[0.6rem] text-gray-500">
-        Add any number of MCP servers. HTTP MCP servers can be authorised here
-        with the local approval key. Each server has separate Connect, Edit and Remove controls.
+      <p className="t-micro text-gray-500">
+        Connect servers here, then explicitly choose which surface can use each server:
+        Main Chat, Agent, both, or neither. Connection alone does not grant Main Chat access.
+        HTTP endpoint approvals are stored privately on this machine.
       </p>
       <div className="space-y-1">
-        <label className="block text-[0.6rem] text-gray-400" htmlFor="lu-mcp-approval-key">
+        <label className="block t-micro text-gray-400" htmlFor="lu-mcp-approval-key">
           Local MCP approval key (never saved in the browser)
         </label>
         <input
@@ -228,14 +191,14 @@ export function MCPServerSettings() {
           type="password"
           autoComplete="off"
           placeholder="LU_MCP_CONFIG_TOKEN from CT213 local .env"
-          className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 focus:border-white/20 outline-none"
+          className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 t-micro text-gray-300 placeholder-gray-600 focus:border-white/20 outline-none"
         />
       </div>
 
       <button
         type="button"
         onClick={handleImportApproved}
-        className="w-full px-3 py-1.5 rounded-lg text-[0.65rem] text-gray-300 bg-white/[0.03] hover:bg-white/5 border border-white/10"
+        className="w-full px-3 py-1.5 rounded-lg t-micro text-gray-300 bg-white/[0.03] hover:bg-white/5 border border-white/10"
       >
         Import previously approved MCP servers
       </button>
@@ -315,6 +278,32 @@ export function MCPServerSettings() {
               </button>
             </div>
 
+            <div className="flex flex-wrap gap-x-4 gap-y-1 pt-2 t-micro text-gray-400">
+              <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={server.useInChat === true}
+                  onChange={(e) => setServerSurfaces(server.id, { useInChat: e.target.checked })}
+                  aria-label={`Allow ${server.name} in Main Chat`}
+                />
+                Main Chat
+              </label>
+              <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={server.useInAgent !== false}
+                  onChange={(e) => setServerSurfaces(server.id, { useInAgent: e.target.checked })}
+                  aria-label={`Allow ${server.name} in Agent mode`}
+                />
+                Agents
+              </label>
+            </div>
+            {!isConnected && (
+              <p className="t-micro text-gray-500 mt-1">
+                Not connected. The selected access will apply after connection.
+              </p>
+            )}
+
             {/* Expanded tool list */}
             {isConnected && tools.length > 0 && (
               <div className="mt-1.5 pt-1.5 border-t border-white/5 space-y-0.5">
@@ -332,7 +321,7 @@ export function MCPServerSettings() {
 
       {/* Error */}
       {error && (
-        <p className="text-[0.6rem] text-red-400 px-2">{error}</p>
+        <p className="t-micro text-red-400 px-2">{error}</p>
       )}
 
       {/* Add Server Form */}
@@ -342,12 +331,12 @@ export function MCPServerSettings() {
             value={formName}
             onChange={(e) => setFormName(e.target.value)}
             placeholder="Server name"
-            className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 focus:border-white/20 outline-none"
+            className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 t-micro text-gray-300 placeholder-gray-600 focus:border-white/20 outline-none"
           />
           <select
             value={formMode}
             onChange={(e) => setFormMode(e.target.value === 'command' ? 'command' : 'http')}
-            className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300"
+            className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 t-micro text-gray-300"
           >
             <option value="http">HTTP MCP server (browser)</option>
             <option value="command">Command MCP server (desktop)</option>
@@ -357,21 +346,21 @@ export function MCPServerSettings() {
               value={formUrl}
               onChange={(e) => setFormUrl(e.target.value)}
               placeholder="MCP endpoint URL, e.g. https://mcp.example.org/mcp"
-              className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 font-mono focus:border-white/20 outline-none"
+              className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 t-micro text-gray-300 placeholder-gray-600 font-mono focus:border-white/20 outline-none"
             />
           ) : (
             <>
               <input
                 value={formCommand}
                 onChange={(e) => setFormCommand(e.target.value)}
-                placeholder="Command (e.g. npx or uvx)"
-                className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 font-mono focus:border-white/20 outline-none"
+                placeholder="Command (npx or uvx)"
+                className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 t-micro text-gray-300 placeholder-gray-600 font-mono focus:border-white/20 outline-none"
               />
               <input
                 value={formArgs}
                 onChange={(e) => setFormArgs(e.target.value)}
                 placeholder="Arguments (space separated)"
-                className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 font-mono focus:border-white/20 outline-none"
+                className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 t-micro text-gray-300 placeholder-gray-600 font-mono focus:border-white/20 outline-none"
               />
             </>
           )}
@@ -383,13 +372,13 @@ export function MCPServerSettings() {
             <button
               onClick={handleSave}
               disabled={!formName.trim() || (formMode === 'http' ? !formUrl.trim() : !formCommand.trim())}
-              className="px-3 py-1 rounded text-[0.6rem] font-medium bg-green-500/15 border border-green-500/30 text-green-300 hover:bg-green-500/25 disabled:opacity-40 transition-colors"
+              className="px-3 py-1 rounded t-micro font-medium bg-green-500/15 border border-green-500/30 text-green-300 hover:bg-green-500/25 disabled:opacity-40 transition-colors"
             >
               {editingId ? 'Save Changes' : 'Add Server'}
             </button>
             <button
               onClick={closeForm}
-              className="px-3 py-1 rounded text-[0.6rem] text-gray-500 hover:text-gray-300 transition-colors"
+              className="px-3 py-1 rounded t-micro text-gray-500 hover:text-gray-300 transition-colors"
             >
               Cancel
             </button>
@@ -398,7 +387,7 @@ export function MCPServerSettings() {
       ) : (
         <button
           onClick={() => setShowAddForm(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[0.65rem] text-gray-500 hover:text-gray-300 bg-white/[0.03] hover:bg-white/5 border border-white/10 hover:border-white/20 transition-colors w-full justify-center"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg t-micro text-gray-500 hover:text-gray-300 bg-white/[0.03] hover:bg-white/5 border border-white/10 hover:border-white/20 transition-colors w-full justify-center"
         >
           <Plus size={12} />
           Add MCP Server
